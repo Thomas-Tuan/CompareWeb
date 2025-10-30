@@ -4,6 +4,7 @@ import type { ArbItem } from "../hooks/useLiveData";
 import { usePositions, getBrokerPositions } from "../hooks/usePositions";
 import { Bell, BellOff, Calendar } from "lucide-react";
 import React from "react";
+import api from "../api/api";
 
 interface Props {
   rows: ArbItem[];
@@ -67,7 +68,6 @@ function formatMini(
   return { mini: takeFirstTwo(full), full };
 }
 
-const TRADE_API_BASE = (import.meta as any).env?.VITE_TRADE_API || "";
 const MERGE_TOASTS = true;
 const SOUND_ALERT = "/sounds/lechgia.mp3";
 const SOUND_VOLUME = Number((import.meta as any).env?.VITE_SOUND_VOLUME || "1");
@@ -407,12 +407,8 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
     );
 
     try {
-      const r = await fetch(`${TRADE_API_BASE}/api/push_signal`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const js = await r.json().catch(() => ({}));
+      const r = await api.post("/api/push_signal", payload);
+      const js = r.data;
       if (!js.ok) {
         // Fail ngay tại forward -> finalize FAIL
         delete pendingRef.current[id];
@@ -610,25 +606,25 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
   // Fetch pending orders (global)
   useEffect(() => {
     let timer: any;
-    const loop = () => {
-      fetch("/receiver/pending")
-        .then((r) => r.json())
-        .then((js) => {
-          if (!js || typeof js !== "object") return;
-          const flat: any[] = [];
-          Object.entries(js).forEach(([bk, arr]: any) => {
-            if (Array.isArray(arr))
-              arr.forEach((o) => {
-                if (o && typeof o === "object") {
-                  flat.push({ ...o, broker: o.broker || bk });
-                }
-              });
-          });
-          flat.sort((a, b) => (b.ts || 0) - (a.ts || 0));
-          setPendingData(flat);
-        })
-        .catch(() => {})
-        .finally(() => (timer = setTimeout(loop, 3000)));
+    const loop = async () => {
+      try {
+        const r = await api.get("/receiver/pending");
+        const js = r.data;
+        const flat: any[] = [];
+        Object.entries(js).forEach(([bk, arr]: any) => {
+          if (Array.isArray(arr))
+            arr.forEach((o) => {
+              if (o && typeof o === "object") {
+                flat.push({ ...o, broker: o.broker || bk });
+              }
+            });
+        });
+        flat.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+        setPendingData(flat);
+      } catch {
+      } finally {
+        timer = setTimeout(loop, 3000);
+      }
     };
     loop();
     return () => clearTimeout(timer);
@@ -682,33 +678,54 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
     prevKeysRef.current = cur;
   }, [filtered, isOld, rowMute, quietFrom, quietTo]);
 
-  // Poll trade_exec (skip ở bảng OLD)
   useEffect(() => {
     let timer: any;
-    const loop = () => {
-      fetch("/receiver/trade_exec")
-        .then((r) => r.json())
-        .then((js) => {
-          const flat: any[] = [];
-          Object.values(js || {}).forEach(
-            (lst: any) => Array.isArray(lst) && lst.forEach((v) => flat.push(v))
-          );
-          flat.sort((a, b) => (a.ts || 0) - (b.ts || 0));
-          flat.forEach((rec) => {
-            const act: "TRADE" | "CLOSE" | "CANCEL_PENDING" =
-              rec.action === "CLOSE"
-                ? "CLOSE"
-                : rec.action === "CANCEL_PENDING"
-                ? "CANCEL_PENDING"
-                : "TRADE";
-            let id = rec.id;
-            const symbolStr = rec.symbol != null ? String(rec.symbol) : "";
-            const ticketStr = rec.ticket != null ? String(rec.ticket) : "";
-            const symOrTk = symbolStr || ticketStr;
-            // Direct id match
-            if (id && pendingRef.current[id]) {
+    const loop = async () => {
+      try {
+        const r = await api.get("/receiver/trade_exec");
+        const js = r.data;
+        const flat: any[] = [];
+        Object.values(js || {}).forEach(
+          (lst: any) => Array.isArray(lst) && lst.forEach((v) => flat.push(v))
+        );
+        flat.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        flat.forEach((rec) => {
+          const act: "TRADE" | "CLOSE" | "CANCEL_PENDING" =
+            rec.action === "CLOSE"
+              ? "CLOSE"
+              : rec.action === "CANCEL_PENDING"
+              ? "CANCEL_PENDING"
+              : "TRADE";
+          const id = rec.id;
+          const symbolStr = String(rec.symbol ?? "");
+          const ticketStr = String(rec.ticket ?? "");
+          const symOrTk = symbolStr || ticketStr;
+          // Giống code cũ finalizeToast...
+          if (id && pendingRef.current[id]) {
+            finalizeToast(
+              id,
+              act,
+              rec.broker,
+              symOrTk,
+              !!rec.exec_ok,
+              rec.error,
+              setToasts,
+              true
+            );
+            delete pendingRef.current[id];
+            delete pendingMetaRef.current[id];
+            return;
+          }
+          for (const [pid, meta] of Object.entries(pendingMetaRef.current)) {
+            if (!pendingRef.current[pid]) continue;
+            if (meta.action !== act || meta.broker !== rec.broker) continue;
+            if (
+              meta.symbolOrTicket === symOrTk ||
+              meta.symbolOrTicket === ticketStr ||
+              meta.symbolOrTicket === symbolStr
+            ) {
               finalizeToast(
-                id,
+                pid,
                 act,
                 rec.broker,
                 symOrTk,
@@ -717,38 +734,16 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
                 setToasts,
                 true
               );
-              delete pendingRef.current[id];
-              delete pendingMetaRef.current[id];
-              return;
+              delete pendingRef.current[pid];
+              delete pendingMetaRef.current[pid];
+              break;
             }
-            // Fallback scan
-            for (const [pid, meta] of Object.entries(pendingMetaRef.current)) {
-              if (!pendingRef.current[pid]) continue;
-              if (meta.action !== act || meta.broker !== rec.broker) continue;
-              if (
-                meta.symbolOrTicket === symOrTk ||
-                meta.symbolOrTicket === ticketStr ||
-                meta.symbolOrTicket === symbolStr
-              ) {
-                finalizeToast(
-                  pid,
-                  act,
-                  rec.broker,
-                  symOrTk,
-                  !!rec.exec_ok,
-                  rec.error,
-                  setToasts,
-                  true
-                );
-                delete pendingRef.current[pid];
-                delete pendingMetaRef.current[pid];
-                break;
-              }
-            }
-          });
-        })
-        .catch(() => {})
-        .finally(() => (timer = setTimeout(loop, execFetchMs)));
+          }
+        });
+      } catch {
+      } finally {
+        timer = setTimeout(loop, execFetchMs);
+      }
     };
     loop();
     return () => clearTimeout(timer);
@@ -1975,12 +1970,12 @@ async function deleteTrigger(r: ArbItem, isOld: boolean) {
     scope: isOld ? "old" : "live",
   };
   if (isOld && r.version != null) body.version = r.version;
-  const res = await fetch("/receiver/delete_trigger", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  return res.json().catch(() => ({}));
+  try {
+    const res = await api.post("/receiver/delete_trigger", body);
+    return res.data;
+  } catch {
+    return {};
+  }
 }
 
 function RowMuteEditor({
