@@ -1,4 +1,5 @@
 import React from 'react'
+import api from '../api/api'
 
 export interface PositionItem {
   broker?: string
@@ -25,9 +26,9 @@ interface PositionsData {
 
 async function fetchPositions(): Promise<PositionsData> {
   const [rMap, rAll] = await Promise.all([
-    fetch('/receiver/positions').then(r=>r.json()).catch(()=> ({})),
-    fetch('/receiver/positions_all').then(r=>r.json()).catch(()=> ({data:[]})),
-  ])
+    api.get("/receiver/positions").then(r => r.data).catch(() => ({})),
+    api.get("/receiver/positions_all").then(r => r.data).catch(() => ({ data: [] })),
+  ]);
   const rawMap = (rMap && typeof rMap==='object') ? rMap : {}
   const byBroker: Record<string, PositionItem[]> = {}
   Object.entries(rawMap).forEach(([bk, v]: [string, any])=>{
