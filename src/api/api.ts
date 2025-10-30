@@ -1,8 +1,12 @@
-import axios from 'axios'
+import axios from "axios";
+
+const API_URL = import.meta.env.VITE_API_URL || "";
 
 const api = axios.create({
-  // Dev: dùng proxy => để '/', Prod: Flask serve dist => cũng '/'
-  baseURL: import.meta.env.VITE_API_BASE || '/'
-})
+  baseURL: API_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
 
-export default api
+export default api;
