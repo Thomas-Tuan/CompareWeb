@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ArbItem } from "../hooks/useLiveData";
 import { usePositions, getBrokerPositions } from "../hooks/usePositions";
@@ -79,7 +79,6 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
     Record<string, { row: ArbItem; firstOrder: number; lastSeen: number }>
   >({});
   const orderRef = useRef(0);
-  const prevKeysRef = useRef<Set<string>>(new Set());
   const inFlightKeyRef = useRef<Set<string>>(new Set());
   const pendingRef = useRef<Record<string, boolean>>({});
   const pendingTimeRef = useRef<Record<string, number>>({});
@@ -94,9 +93,8 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
     >
   >({});
   const audioAlertRef = useRef<HTMLAudioElement | null>(null);
-  const soundUnlockedRef = useRef(false);
-  const pendingPlayRef = useRef(false);
   const [stableVersion, setStableVersion] = useState(0);
+  const prevActiveKeysRef = useRef<Set<string>>(new Set());
 
   // Unique ID generator cho signal (tránh phụ thuộc format tự ráp dễ lệch với exec)
   const genSignalId = useRef<{ next: () => string }>({
@@ -125,15 +123,6 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
     }
   });
   const [hideModalOpen, setHideModalOpen] = useState(false);
-
-  useEffect(() => {
-    if (!rows.length) {
-      stableRef.current = {};
-      prevKeysRef.current = new Set();
-      orderRef.current = 0;
-      setStableVersion((v) => v + 1);
-    }
-  }, [rows.length]);
 
   useEffect(() => {
     localStorage.setItem("hiddenMapV1", JSON.stringify(hiddenMap));
@@ -334,24 +323,44 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
     } catch {}
   };
 
-  const playSound = () => {
-    if (isOld) return;
-    if (isWithinQuiet()) return;
-    if (disableSound) return;
-    if (!soundUnlockedRef.current) {
-      pendingPlayRef.current = true;
-      return;
-    }
-    const a = audioAlertRef.current;
-    if (a) {
+  const playSound = useCallback(() => {
+    if (isOld || disableSound || isWithinQuiet()) return;
+    const audio = audioAlertRef.current;
+    if (audio) {
       try {
-        a.currentTime = 0;
-        a.play().catch(() => playBeep(660));
+        audio.currentTime = 0;
+        const promise = audio.play();
+        if (promise && typeof promise.catch === "function") {
+          promise.catch(() => playBeep(660));
+        }
+        return;
       } catch {
-        playBeep(660);
+        /* ignore */
       }
-    } else playBeep(660);
-  };
+    }
+    playBeep(660);
+  }, [disableSound, isOld, isWithinQuiet]);
+
+  useEffect(() => {
+    const activeKeys = new Set(
+      rows.filter((r) => r.trigger1 || r.trigger2).map((r) => keyOf(r))
+    );
+    let shouldPlay = false;
+    activeKeys.forEach((k) => {
+      if (!prevActiveKeysRef.current.has(k) && !isRowMuted(k)) {
+        shouldPlay = true;
+      }
+    });
+    prevActiveKeysRef.current = activeKeys;
+    if (shouldPlay) playSound();
+  }, [rows, playSound, isRowMuted]);
+
+  useEffect(() => {
+    const audio = new Audio(SOUND_ALERT);
+    audio.preload = "auto";
+    audio.volume = Math.min(1, Math.max(0, SOUND_VOLUME));
+    audioAlertRef.current = audio;
+  }, []);
 
   const finalizeToast = (
     id: string,
@@ -586,18 +595,6 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
     });
   };
 
-  // ===== Effects =====
-  // Maintain stable rows
-  useEffect(() => {
-    if (isOld || disableSound || rows.length === 0) return;
-    const cur = new Set(filtered.map(keyOf));
-    const playNeeded = [...cur].some(
-      (k) => !prevKeysRef.current.has(k) && !isRowMuted(k)
-    );
-    if (playNeeded) playSound();
-    prevKeysRef.current = cur;
-  }, [filtered, isOld, rowMute, quietFrom, quietTo, disableSound, rows.length]);
-
   useEffect(() => {
     const t = nowSec();
     const currentKeys = new Set<string>();
@@ -704,17 +701,6 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
       return ch ? nv : v;
     });
   }, [filtered]);
-
-  // New row sound (only new table)
-  useEffect(() => {
-    if (isOld) return;
-    const cur = new Set(filtered.map(keyOf));
-    const playNeeded = [...cur].some(
-      (k) => !prevKeysRef.current.has(k) && !isRowMuted(k)
-    );
-    if (playNeeded) playSound();
-    prevKeysRef.current = cur;
-  }, [filtered, isOld, rowMute, quietFrom, quietTo]);
 
   useEffect(() => {
     let timer: any;
@@ -831,43 +817,6 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
     a.preload = "auto";
     a.volume = Math.min(1, Math.max(0, SOUND_VOLUME));
     audioAlertRef.current = a;
-  }, []);
-
-  // Unlock audio
-  useEffect(() => {
-    const unlock = () => {
-      if (soundUnlockedRef.current) return;
-      try {
-        const Ctx = window.AudioContext || (window as any).webkitAudioContext;
-        const ctx = new Ctx();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        gain.gain.value = 0.0001;
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        setTimeout(() => {
-          try {
-            osc.stop();
-            ctx.close();
-          } catch {}
-        }, 30);
-      } catch {}
-      soundUnlockedRef.current = true;
-      if (pendingPlayRef.current) {
-        pendingPlayRef.current = false;
-        playSound();
-      }
-      window.removeEventListener("pointerdown", unlock);
-      window.removeEventListener("keydown", unlock);
-    };
-    window.addEventListener("pointerdown", unlock, { once: false });
-    window.addEventListener("keydown", unlock, { once: false });
-    return () => {
-      window.removeEventListener("pointerdown", unlock);
-      window.removeEventListener("keydown", unlock);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Old age tick
@@ -1598,9 +1547,10 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
               <th className="text-left">Client</th>
               <th className="text-center">Client / One-Click</th>
               <th className="text-left">Symbol</th>
+              {isOld && <th className="text-center">Thời gian</th>}
               <th className="text-right">Độ lệch</th>
               <th className="text-center">Gap Pts</th>
-              {!isOld && <th className="text-center">Mark</th>}
+              {!isOld && <th className="text-center">No alert</th>}
               <th className="text-left">Server</th>
               <th className="text-center">Server / One-Click</th>
               <th className="text-center">Action</th> {/* NEW */}
@@ -1632,6 +1582,14 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
                   : t2
                   ? "SELL"
                   : null;
+                const localTimeDisplay =
+                  r.local_time ||
+                  (r.ended_ts &&
+                    new Date(r.ended_ts * 1000).toLocaleTimeString()) ||
+                  (r.last_update_ts &&
+                    new Date(r.last_update_ts * 1000).toLocaleTimeString()) ||
+                  (r.ts && new Date(r.ts * 1000).toLocaleTimeString()) ||
+                  "-";
                 const fsBidServer = formatMini(bidServer, {
                   symbol: r.symbol,
                   category: r.category,
@@ -1769,6 +1727,11 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
                           );
                         })()}
                     </td>
+                    {isOld && (
+                      <td className="px-3 py-1 text-center font-mono">
+                        {localTimeDisplay}
+                      </td>
+                    )}
                     <td className="px-3 py-1 text-right font-mono">
                       {diff != null ? diff.toFixed(2) : "-"}
                     </td>
