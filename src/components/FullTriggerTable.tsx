@@ -589,6 +589,16 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
   // ===== Effects =====
   // Maintain stable rows
   useEffect(() => {
+    if (isOld || disableSound || rows.length === 0) return;
+    const cur = new Set(filtered.map(keyOf));
+    const playNeeded = [...cur].some(
+      (k) => !prevKeysRef.current.has(k) && !isRowMuted(k)
+    );
+    if (playNeeded) playSound();
+    prevKeysRef.current = cur;
+  }, [filtered, isOld, rowMute, quietFrom, quietTo, disableSound, rows.length]);
+
+  useEffect(() => {
     const t = nowSec();
     const currentKeys = new Set<string>();
     let changed = false;
