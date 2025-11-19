@@ -1553,7 +1553,7 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
               {!isOld && <th className="text-center">No alert</th>}
               <th className="text-left">Server</th>
               <th className="text-center">Server / One-Click</th>
-              <th className="text-center">Action</th> {/* NEW */}
+              <th className="text-center">Action</th>
             </tr>
           </thead>
           <tbody>
