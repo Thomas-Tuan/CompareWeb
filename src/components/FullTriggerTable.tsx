@@ -548,22 +548,18 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
     venue: "server" | "client"
   ) => {
     const k = keyOf(r);
-    const vol = parseFloat(
-      (venue === "server" ? volServer[k] : volClient[k]) || "0"
-    );
+    const volStr = venue === "server" ? volServer[k] : volClient[k];
+    const vol = Number(volStr);
     const broker = venue === "server" ? r.server : r.client;
     const rawSymbol =
       venue === "server" ? r.server_raw || r.symbol : r.client_raw || r.symbol;
-    if (!broker || !rawSymbol || !vol) return;
+    if (!broker || !rawSymbol || !(vol > 0)) return;
     sendSignal({
       broker,
       action: "TRADE",
       symbol: rawSymbol,
       side,
       volume: vol,
-      sl_points: 0,
-      tp_points: 0,
-      max_slippage: 30,
       comment: "WebTrade",
     });
   };
@@ -683,7 +679,7 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
       const nv = { ...v };
       keys.forEach((k) => {
         if (!(k in nv)) {
-          nv[k] = "0.01";
+          nv[k] = "";
           ch = true;
         }
       });
@@ -694,7 +690,7 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
       const nv = { ...v };
       keys.forEach((k) => {
         if (!(k in nv)) {
-          nv[k] = "0.01";
+          nv[k] = "";
           ch = true;
         }
       });
