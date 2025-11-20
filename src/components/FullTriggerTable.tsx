@@ -548,8 +548,9 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
     venue: "server" | "client"
   ) => {
     const k = keyOf(r);
-    const volStr = venue === "server" ? volServer[k] : volClient[k];
-    const vol = Number(volStr);
+    const vol = parseFloat(
+      (venue === "server" ? volServer[k] : volClient[k]) || "0"
+    );
     const broker = venue === "server" ? r.server : r.client;
     const rawSymbol =
       venue === "server" ? r.server_raw || r.symbol : r.client_raw || r.symbol;
@@ -679,7 +680,7 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
       const nv = { ...v };
       keys.forEach((k) => {
         if (!(k in nv)) {
-          nv[k] = "";
+          nv[k] = "0.01";
           ch = true;
         }
       });
@@ -690,7 +691,7 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
       const nv = { ...v };
       keys.forEach((k) => {
         if (!(k in nv)) {
-          nv[k] = "";
+          nv[k] = "0.01";
           ch = true;
         }
       });
