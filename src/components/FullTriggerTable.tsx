@@ -10,6 +10,7 @@ interface Props {
   rows: ArbItem[];
   disableSound?: boolean;
   isOld?: boolean;
+  soundUrl?: string;
 }
 
 interface Toast {
@@ -72,7 +73,12 @@ const MERGE_TOASTS = true;
 const SOUND_ALERT = "/sounds/lechgia.mp3";
 const SOUND_VOLUME = Number((import.meta as any).env?.VITE_SOUND_VOLUME || "1");
 
-export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
+export default function FullTriggerTable({
+  rows,
+  disableSound,
+  isOld,
+  soundUrl,
+}: Props) {
   // ===== Core refs / states =====
   const positionsData = usePositions(1000);
   const stableRef = useRef<
@@ -93,8 +99,10 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
     >
   >({});
   const audioAlertRef = useRef<HTMLAudioElement | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const [stableVersion, setStableVersion] = useState(0);
   const prevActiveKeysRef = useRef<Set<string>>(new Set());
+  const alertSrc = soundUrl || SOUND_ALERT;
 
   // Unique ID generator cho signal (tránh phụ thuộc format tự ráp dễ lệch với exec)
   const genSignalId = useRef<{ next: () => string }>({
@@ -304,42 +312,58 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
       ? "Hủy lệnh chờ"
       : "Mở lệnh";
 
-  const playBeep = (freq = 880, durMs = 120) => {
+  const playBeep = useCallback((freq = 880, durMs = 120) => {
     try {
       const Ctx = window.AudioContext || (window as any).webkitAudioContext;
-      const ctx = new Ctx();
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = freq;
-      osc.connect(g);
-      g.connect(ctx.destination);
-      g.gain.value = 0.35;
-      osc.start();
-      setTimeout(() => {
-        osc.stop();
-        ctx.close();
-      }, durMs);
+      if (!Ctx) return;
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new Ctx();
+      }
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      const start = () => {
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        osc.connect(g);
+        g.connect(ctx.destination);
+        g.gain.value = 0.35;
+        osc.start();
+        setTimeout(() => {
+          try {
+            g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.1);
+            osc.stop(ctx.currentTime + 0.1);
+            osc.disconnect();
+            g.disconnect();
+          } catch {}
+        }, durMs);
+      };
+      if (ctx.state !== "running") {
+        ctx
+          .resume()
+          .then(() => {
+            if (ctx.state === "running") start();
+          })
+          .catch(() => {});
+        return;
+      }
+      start();
     } catch {}
-  };
+  }, []);
 
   const playSound = useCallback(() => {
     if (isOld || disableSound || isWithinQuiet()) return;
     const audio = audioAlertRef.current;
     if (audio) {
-      try {
-        audio.currentTime = 0;
-        const promise = audio.play();
-        if (promise && typeof promise.catch === "function") {
-          promise.catch(() => playBeep(660));
-        }
-        return;
-      } catch {
-        /* ignore */
-      }
+      audio.currentTime = 0;
+      audio.play().catch(() => {
+        playBeep(660);
+      });
+      return;
     }
     playBeep(660);
-  }, [disableSound, isOld, isWithinQuiet]);
+  }, [disableSound, isOld, isWithinQuiet, playBeep]);
 
   useEffect(() => {
     const activeKeys = new Set(
@@ -356,11 +380,40 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
   }, [rows, playSound, isRowMuted]);
 
   useEffect(() => {
-    const audio = new Audio(SOUND_ALERT);
+    const audio = new Audio(alertSrc);
     audio.preload = "auto";
     audio.volume = Math.min(1, Math.max(0, SOUND_VOLUME));
     audioAlertRef.current = audio;
-  }, []);
+    return () => {
+      audio.pause();
+    };
+  }, [alertSrc]);
+
+  useEffect(() => {
+    const unlock = () => {
+      const audio = audioAlertRef.current;
+      if (audio) {
+        audio
+          .play()
+          .then(() => {
+            audio.pause();
+            audio.currentTime = 0;
+          })
+          .catch(() => {});
+      }
+      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+      if (Ctx && !audioCtxRef.current) {
+        try {
+          audioCtxRef.current = new Ctx();
+        } catch {
+          return;
+        }
+      }
+      audioCtxRef.current?.resume().catch(() => {});
+    };
+    window.addEventListener("pointerdown", unlock, { once: true });
+    return () => window.removeEventListener("pointerdown", unlock);
+  }, [alertSrc]);
 
   const finalizeToast = (
     id: string,
@@ -810,11 +863,14 @@ export default function FullTriggerTable({ rows, disableSound, isOld }: Props) {
 
   // Load audio
   useEffect(() => {
-    const a = new Audio(SOUND_ALERT);
-    a.preload = "auto";
-    a.volume = Math.min(1, Math.max(0, SOUND_VOLUME));
-    audioAlertRef.current = a;
-  }, []);
+    const audio = new Audio(alertSrc);
+    audio.preload = "auto";
+    audio.volume = Math.min(1, Math.max(0, SOUND_VOLUME));
+    audioAlertRef.current = audio;
+    return () => {
+      audio.pause();
+    };
+  }, [alertSrc]);
 
   // Old age tick
   useEffect(() => {
