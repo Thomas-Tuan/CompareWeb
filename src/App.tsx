@@ -7,7 +7,7 @@ import { useState } from "react";
 export default function App() {
   const { data, isLoading, error } = useLiveData();
   const [dashboardTitle, setDashboardTitle] = useState<string>(() => {
-    return localStorage.getItem("dashboardTitle") || "Receiver Dashboard";
+    return localStorage.getItem("dashboardTitle") || "Nhánh a Phát";
   });
   const [customSound, setCustomSound] = useState<string | null>(() => {
     return localStorage.getItem("customSound") || null;
