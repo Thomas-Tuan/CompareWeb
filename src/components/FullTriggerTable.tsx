@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ArbItem } from "../hooks/useLiveData";
 import { usePositions, getBrokerPositions } from "../hooks/usePositions";
-import { Bell, BellOff, Calendar, Upload } from "lucide-react";
+import { Bell, BellOff, Calendar, ArrowUp } from "lucide-react";
 import React from "react";
 import api from "../api/api";
 
@@ -2074,7 +2074,7 @@ export default function FullTriggerTable({
                         title="Gửi dòng này lên Google Sheet"
                         aria-label="Push lên Sheet"
                       >
-                        <Upload size={14} />
+                        <ArrowUp size={14} />
                       </button>
                     </td>
                   </tr>
