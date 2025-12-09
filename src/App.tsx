@@ -1,8 +1,14 @@
+import { useEffect, useState } from "react";
+import {
+  getSheetsConfig,
+  saveSheetsConfig,
+  pushSheetsNow,
+  type SheetsConfig,
+} from "./api/api";
 import { useLiveData } from "./hooks/useLiveData";
 import "./index.scss";
 import SetIntervalControl from "./components/SetInterval";
 import FullTriggerTable from "./components/FullTriggerTable";
-import { useState } from "react";
 
 export default function App() {
   const { data, isLoading, error } = useLiveData();
@@ -12,9 +18,84 @@ export default function App() {
   const [customSound, setCustomSound] = useState<string | null>(() => {
     return localStorage.getItem("customSound") || null;
   });
+
+  // Config rút gọn: chỉ link, tên sheet + chọn tên người
+  const [cfg, setCfg] = useState<SheetsConfig>({
+    sheet_url: "",
+    sheet_name: "Sheet1",
+    owner_name: "Phát",
+  });
+  const [cfgLoading, setCfgLoading] = useState(false);
+  const [cfgMsg, setCfgMsg] = useState<string | null>(null);
+  const [pushing, setPushing] = useState(false);
+
+  // Popup cấu hình
+  const [showConfig, setShowConfig] = useState(false);
+  const [tempUrl, setTempUrl] = useState("");
+  const [tempSheet, setTempSheet] = useState("Sheet1");
+  const [tempOwner, setTempOwner] = useState("Phát");
+
+  useEffect(() => {
+    setCfgLoading(true);
+    getSheetsConfig()
+      .then((c) => {
+        setCfg({
+          sheet_url: c.sheet_url || "",
+          sheet_name: c.sheet_name || "Sheet1",
+          owner_name: c.owner_name || "Phát",
+        });
+        setTempUrl(c.sheet_url || "");
+        setTempSheet(c.sheet_name || "Sheet1");
+        setTempOwner(c.owner_name || "Phát");
+      })
+      .catch(() => {})
+      .finally(() => setCfgLoading(false));
+  }, []);
+
+  const openConfig = () => {
+    setTempUrl(cfg.sheet_url || "");
+    setTempSheet(cfg.sheet_name || "Sheet1");
+    setTempOwner(cfg.owner_name || "Phát");
+    setShowConfig(true);
+  };
+
+  const saveConfigPopup = async () => {
+    const nextCfg: SheetsConfig = {
+      sheet_url: tempUrl.trim(),
+      sheet_name: tempSheet.trim() || "Sheet1",
+      owner_name: tempOwner.trim(),
+    };
+    try {
+      await saveSheetsConfig(nextCfg);
+      setCfg(nextCfg);
+      setCfgMsg(`Đã lưu cấu hình thành công`);
+    } catch (e: any) {
+      setCfgMsg(e?.message || "Lỗi lưu cấu hình");
+    }
+  };
+
+  const onPush = async () => {
+    setPushing(true);
+    // Chỉ hiển thị trong popup, không hiển thị ngoài
+    setCfgMsg(null);
+    try {
+      const res = await pushSheetsNow();
+      if (res.ok) {
+        setCfgMsg("Đẩy dữ liệu thành công");
+      } else {
+        setCfgMsg(res.error || "Push fail");
+      }
+    } catch (e: any) {
+      setCfgMsg(e?.message || "Lỗi push");
+    } finally {
+      setPushing(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-[1900px] p-4 space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      {/* Thanh control: cùng một hàng */}
+      <div className="flex items-center justify-between flex-wrap gap-3 bg-neutral-800/40 p-3 rounded-lg">
         <div className="flex items-center gap-3">
           <input
             type="text"
@@ -26,6 +107,7 @@ export default function App() {
             }}
             className="px-3 py-2 rounded-md text-lg font-semibold text-amber-200 bg-neutral-800/80 focus:outline-none focus:ring-2 focus:ring-amber-400/60 shadow"
           />
+          {/* Sound */}
           <label className="px-3 py-2 text-xs rounded-md bg-indigo-600 hover:bg-indigo-500 cursor-pointer text-white shadow">
             Sound
             <input
@@ -40,9 +122,7 @@ export default function App() {
                   const result =
                     typeof reader.result === "string" ? reader.result : null;
                   setCustomSound(result);
-                  if (result) {
-                    localStorage.setItem("customSound", result);
-                  }
+                  if (result) localStorage.setItem("customSound", result);
                 };
                 reader.readAsDataURL(file);
               }}
@@ -59,9 +139,22 @@ export default function App() {
               Clear
             </button>
           )}
+          {/* Cấu hình cùng row */}
+          <button
+            onClick={openConfig}
+            className="px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-sm"
+          >
+            Cấu hình Google Sheet
+          </button>
+          {cfgLoading && (
+            <span className="text-xs text-neutral-400">Đang tải config...</span>
+          )}
+          {/* XÓA hiển thị cfgMsg ngoài giao diện chính */}
+          {/* (không render cfgMsg ở đây nữa) */}
         </div>
         <SetIntervalControl />
       </div>
+
       {isLoading && <div className="text-neutral-400 text-xs">Loading...</div>}
       {error && <div className="text-red-400 text-xs">Load lỗi</div>}
       {data && (
@@ -83,6 +176,73 @@ export default function App() {
             <FullTriggerTable rows={data.old} disableSound={true} isOld />
           </div>
         </>
+      )}
+
+      {/* Popup cấu hình: có Push ở đây và hiển thị trạng thái tại chỗ */}
+      {showConfig && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-neutral-900 rounded-lg p-4 w-full max-w-lg shadow-lg border border-neutral-700">
+            <h4 className="text-sm font-semibold text-neutral-200 mb-3">
+              Cấu hình Google Sheet
+            </h4>
+            <div className="space-y-3">
+              <input
+                className="px-3 py-2 rounded-md bg-neutral-800 text-neutral-200 w-full"
+                placeholder="Google Sheet URL"
+                value={tempUrl}
+                onChange={(e) => setTempUrl(e.target.value)}
+              />
+              <input
+                className="px-3 py-2 rounded-md bg-neutral-800 text-neutral-200 w-full"
+                placeholder="Tên bảng (ví dụ: Sheet1)"
+                value={tempSheet}
+                onChange={(e) => setTempSheet(e.target.value)}
+              />
+              <select
+                className="px-3 py-2 rounded-md bg-neutral-800 text-neutral-200 w-full"
+                value={tempOwner}
+                onChange={(e) => setTempOwner(e.target.value)}
+              >
+                {["Lâm", "Khang", "Phát", "Phi", "Tâm", "Tuấn"].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+              {cfgMsg && (
+                <div className="text-xs px-2 py-1 rounded bg-neutral-800 text-neutral-300">
+                  {cfgMsg}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2 mt-4">
+              <button
+                onClick={saveConfigPopup}
+                className="px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-sm"
+              >
+                Lưu cấu hình
+              </button>
+              <button
+                onClick={onPush}
+                disabled={
+                  pushing ||
+                  !tempUrl.trim() ||
+                  !tempSheet.trim() ||
+                  !tempOwner.trim()
+                }
+                className="px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm disabled:opacity-60"
+              >
+                {pushing ? "Đang đẩy dữ liệu..." : "Đẩy dữ liệu lên Sheet"}
+              </button>
+              <button
+                onClick={() => setShowConfig(false)}
+                className="px-3 py-2 rounded-md bg-neutral-700 hover:bg-neutral-600 text-white text-sm"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

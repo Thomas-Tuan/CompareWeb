@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ArbItem } from "../hooks/useLiveData";
 import { usePositions, getBrokerPositions } from "../hooks/usePositions";
-import { Bell, BellOff, Calendar } from "lucide-react";
+import { Bell, BellOff, Calendar, Upload } from "lucide-react";
 import React from "react";
 import api from "../api/api";
 
@@ -72,6 +72,10 @@ function formatMini(
 const MERGE_TOASTS = true;
 const SOUND_ALERT = "/sounds/lechgia.mp3";
 const SOUND_VOLUME = Number((import.meta as any).env?.VITE_SOUND_VOLUME || "1");
+
+// helper: xác định chiều vào lệnh từ trigger
+const calcSide = (r: ArbItem): "BUY" | "SELL" | "-" =>
+  r.trigger1 ? "BUY" : r.trigger2 ? "SELL" : "-";
 
 export default function FullTriggerTable({
   rows,
@@ -182,7 +186,7 @@ export default function FullTriggerTable({
   const [combinedSearch, setCombinedSearch] = useState("");
   const [volServer, setVolServer] = useState<Record<string, string>>({});
   const [volClient, setVolClient] = useState<Record<string, string>>({});
-  const [oldMaxAgeSec, setOldMaxAgeSec] = useState<number>(isOld ? 180 : 0);
+  const [oldMaxAgeSec, setOldMaxAgeSec] = useState<number>(isOld ? 14400 : 0);
   const [timeTick, setTimeTick] = useState(() => Date.now() / 1000);
   const [expandedBrokers, setExpandedBrokers] = useState<Set<string>>(
     new Set()
@@ -604,10 +608,19 @@ export default function FullTriggerTable({
     const vol = parseFloat(
       (venue === "server" ? volServer[k] : volClient[k]) || "0"
     );
+    const minVol =
+      venue === "server"
+        ? typeof r.min_volume_server === "number"
+          ? r.min_volume_server
+          : 0.01
+        : typeof r.min_volume_client === "number"
+        ? r.min_volume_client
+        : 0.01;
     const broker = venue === "server" ? r.server : r.client;
     const rawSymbol =
       venue === "server" ? r.server_raw || r.symbol : r.client_raw || r.symbol;
     if (!broker || !rawSymbol || !(vol > 0)) return;
+    if (vol < minVol) return;
     sendSignal({
       broker,
       action: "TRADE",
@@ -644,6 +657,42 @@ export default function FullTriggerTable({
       comment: "WebCancelPending",
     });
   };
+
+  useEffect(() => {
+    const keys = filtered.map(keyOf);
+    setVolServer((v) => {
+      let ch = false;
+      const nv = { ...v };
+      keys.forEach((k) => {
+        if (!(k in nv)) {
+          const row = filtered.find((r) => keyOf(r) === k);
+          const minVol =
+            row && typeof row.min_volume_server === "number"
+              ? String(row.min_volume_server)
+              : "0.01";
+          nv[k] = minVol;
+          ch = true;
+        }
+      });
+      return ch ? nv : v;
+    });
+    setVolClient((v) => {
+      let ch = false;
+      const nv = { ...v };
+      keys.forEach((k) => {
+        if (!(k in nv)) {
+          const row = filtered.find((r) => keyOf(r) === k);
+          const minVol =
+            row && typeof row.min_volume_client === "number"
+              ? String(row.min_volume_client)
+              : "0.01";
+          nv[k] = minVol;
+          ch = true;
+        }
+      });
+      return ch ? nv : v;
+    });
+  }, [filtered]);
 
   useEffect(() => {
     const t = nowSec();
@@ -724,33 +773,6 @@ export default function FullTriggerTable({
       setServerFilter("ALL");
     }
   }, [displayRows, serverFilter]);
-
-  // Init volume inputs
-  useEffect(() => {
-    const keys = filtered.map(keyOf);
-    setVolServer((v) => {
-      let ch = false;
-      const nv = { ...v };
-      keys.forEach((k) => {
-        if (!(k in nv)) {
-          nv[k] = "0.01";
-          ch = true;
-        }
-      });
-      return ch ? nv : v;
-    });
-    setVolClient((v) => {
-      let ch = false;
-      const nv = { ...v };
-      keys.forEach((k) => {
-        if (!(k in nv)) {
-          nv[k] = "0.01";
-          ch = true;
-        }
-      });
-      return ch ? nv : v;
-    });
-  }, [filtered]);
 
   useEffect(() => {
     let timer: any;
@@ -1471,6 +1493,8 @@ export default function FullTriggerTable({
               value={oldMaxAgeSec / 60}
               onChange={(e) => {
                 const mins = Math.max(0, Number(e.target.value) || 0);
+                // Convert phút -> giây tại đây
+                // rồi đổi công thức thành: secs = unit === 'hour' ? hours*3600 : mins*60
                 setOldMaxAgeSec(mins * 60);
               }}
               placeholder="Giữ kèo(min): "
@@ -1607,6 +1631,7 @@ export default function FullTriggerTable({
               <th className="text-left">Server</th>
               <th className="text-center">Server / One-Click</th>
               <th className="text-center">Action</th>
+              <th className="text-center">Có kèo</th>
             </tr>
           </thead>
           <tbody>
@@ -1691,6 +1716,12 @@ export default function FullTriggerTable({
                       <div className="flex flex-col items-center gap-2">
                         <input
                           type="number"
+                          step="0.01"
+                          min={Number(
+                            typeof r.min_volume_client === "number"
+                              ? r.min_volume_client
+                              : 0.01
+                          )}
                           className="w-20 bg-neutral-900 border border-neutral-600 rounded px-1 py-1 text-[11px] font-medium text-center mb-1"
                           value={volClient[k] || ""}
                           onChange={(e) =>
@@ -1894,6 +1925,12 @@ export default function FullTriggerTable({
                       <div className="flex flex-col items-center gap-2">
                         <input
                           type="number"
+                          step="0.01"
+                          min={Number(
+                            typeof r.min_volume_server === "number"
+                              ? r.min_volume_server
+                              : 0.01
+                          )}
                           className="w-20 bg-neutral-900 border border-neutral-600 rounded px-1 py-1 text-[11px] font-medium text-center mb-1"
                           value={volServer[k] || ""}
                           onChange={(e) =>
@@ -1975,6 +2012,70 @@ export default function FullTriggerTable({
                           Ẩn kèo
                         </button>
                       )}
+                    </td>
+                    <td className="px-3 py-1 text-center">
+                      <button
+                        onClick={async () => {
+                          const side = calcSide(r);
+                          const payload = {
+                            client: r.client || "",
+                            server: r.server || "",
+                            symbol: r.symbol || "",
+                            side,
+                            bid:
+                              side === "BUY"
+                                ? r.ask_client ?? r.ask_server ?? null
+                                : r.bid_client ?? r.bid_server ?? null,
+                            ask:
+                              side === "BUY"
+                                ? r.ask_server ?? r.ask_client ?? null
+                                : r.ask_server ?? r.ask_client ?? null,
+                            time:
+                              r.local_time ||
+                              (r.ts
+                                ? new Date(r.ts * 1000)
+                                    .toISOString()
+                                    .replace("T", " ")
+                                    .slice(0, 19)
+                                : ""),
+                            diff: r.trigger1
+                              ? r.diff1_points_abs
+                              : r.trigger2
+                              ? r.diff2_points_abs
+                              : null,
+                          };
+                          try {
+                            const res = await api.post(
+                              "/api/sheets/push_row",
+                              payload
+                            );
+                            upsertToast(
+                              setToasts,
+                              `PUSH_${r.server || ""}_${r.client || ""}_${
+                                r.symbol || ""
+                              }`,
+                              res.data?.ok ? "success" : "fail",
+                              res.data?.ok
+                                ? "Đẩy dữ liệu thành công"
+                                : res.data?.error || "Push thất bại"
+                            );
+                          } catch (e: any) {
+                            upsertToast(
+                              setToasts,
+                              `PUSH_${r.server || ""}_${r.client || ""}_${
+                                r.symbol || ""
+                              }`,
+                              "fail",
+                              e?.message || "Push thất bại"
+                            );
+                          }
+                        }}
+                        className="inline-flex items-center justify-center w-7 h-7 rounded bg-emerald-600/80 hover:bg-emerald-500 text-white"
+                        title="Gửi dòng này lên Google Sheet"
+                        aria-label="Push lên Sheet"
+                      >
+                        <Upload size={14} />
+                      </button>
                     </td>
                   </tr>
                 );

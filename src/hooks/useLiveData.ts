@@ -57,6 +57,8 @@ export interface ArbItem {
   reason?: string
   active?: boolean 
   local_time?: string
+  min_volume_server?: number
+  min_volume_client?: number
 }
 
 export interface LiveData {
