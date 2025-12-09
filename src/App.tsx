@@ -55,7 +55,8 @@ export default function App() {
   const openConfig = () => {
     setTempUrl(cfg.sheet_url || "");
     setTempSheet(cfg.sheet_name || "Sheet1");
-    setTempOwner(cfg.owner_name || "Phát");
+    setTempOwner(cfg.owner_name || "A");
+    setCfgMsg(null);
     setShowConfig(true);
   };
 
@@ -69,6 +70,7 @@ export default function App() {
       await saveSheetsConfig(nextCfg);
       setCfg(nextCfg);
       setCfgMsg(`Đã lưu cấu hình thành công`);
+      setTimeout(() => setCfgMsg(null), 3000);
     } catch (e: any) {
       setCfgMsg(e?.message || "Lỗi lưu cấu hình");
     }
@@ -89,6 +91,7 @@ export default function App() {
       setCfgMsg(e?.message || "Lỗi push");
     } finally {
       setPushing(false);
+      setTimeout(() => setCfgMsg(null), 3000);
     }
   };
 
@@ -181,10 +184,25 @@ export default function App() {
       {/* Popup cấu hình: có Push ở đây và hiển thị trạng thái tại chỗ */}
       {showConfig && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-neutral-900 rounded-lg p-4 w-full max-w-lg shadow-lg border border-neutral-700">
-            <h4 className="text-sm font-semibold text-neutral-200 mb-3">
+          <div className="relative bg-neutral-900 rounded-lg p-4 w-full max-w-lg shadow-lg border border-neutral-700">
+            {/* Nút X góc phải */}
+            <button
+              onClick={() => {
+                setShowConfig(false);
+                setCfgMsg(null);
+              }}
+              className="absolute top-2 right-2 inline-flex items-center justify-center w-8 h-8 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-200"
+              aria-label="Close"
+              title="Đóng"
+            >
+              ×
+            </button>
+
+            {/* Header popup */}
+            <h4 className="text-sm font-semibold text-neutral-200 mb-3 pr-10">
               Cấu hình Google Sheet
             </h4>
+
             <div className="space-y-3">
               <input
                 className="px-3 py-2 rounded-md bg-neutral-800 text-neutral-200 w-full"
@@ -215,6 +233,7 @@ export default function App() {
                 </div>
               )}
             </div>
+
             <div className="flex items-center gap-2 mt-4">
               <button
                 onClick={saveConfigPopup}
@@ -233,12 +252,6 @@ export default function App() {
                 className="px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm disabled:opacity-60"
               >
                 {pushing ? "Đang đẩy dữ liệu..." : "Đẩy dữ liệu lên Sheet"}
-              </button>
-              <button
-                onClick={() => setShowConfig(false)}
-                className="px-3 py-2 rounded-md bg-neutral-700 hover:bg-neutral-600 text-white text-sm"
-              >
-                Đóng
               </button>
             </div>
           </div>
