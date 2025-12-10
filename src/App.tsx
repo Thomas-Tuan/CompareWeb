@@ -78,15 +78,14 @@ export default function App() {
 
   const onPush = async () => {
     setPushing(true);
-    // Chỉ hiển thị trong popup, không hiển thị ngoài
     setCfgMsg(null);
     try {
-      const res = await pushSheetsNow();
-      if (res.ok) {
-        setCfgMsg("Đẩy dữ liệu thành công");
-      } else {
-        setCfgMsg(res.error || "Push fail");
-      }
+      const localTimeClick = new Date().toLocaleTimeString();
+      const res = await pushSheetsNow({
+        owner_name: (tempOwner || "").trim(),
+        local_time: localTimeClick,
+      });
+      setCfgMsg(res.ok ? "Đẩy dữ liệu thành công" : res.error || "Push fail");
     } catch (e: any) {
       setCfgMsg(e?.message || "Lỗi push");
     } finally {

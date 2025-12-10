@@ -26,7 +26,10 @@ export async function saveSheetsConfig(cfg: SheetsConfig): Promise<void> {
   await api.post("/api/sheets/config", cfg);
 }
 
-export async function pushSheetsNow(): Promise<{
+export async function pushSheetsNow(body?: {
+  owner_name?: string;
+  local_time?: string;
+}): Promise<{
   ok: boolean;
   updated?: number;
   cells?: string[];
@@ -35,10 +38,13 @@ export async function pushSheetsNow(): Promise<{
   sheet?: { url: string; name: string };
   owner?: string;
 }> {
-  const r = await api.post("/api/sheets/push");
+  // Cho phép truyền payload (owner_name, local_time). Nếu không có, backend vẫn xử lý nhưng Time sẽ trống.
+  const r = await api.post("/api/sheets/push", body || {});
   const j = r.data ?? {};
   if (r.status < 200 || r.status >= 300 || j?.ok === false) {
     throw new Error(j?.detail || j?.error || "Push fail");
   }
   return j;
 }
+
+
