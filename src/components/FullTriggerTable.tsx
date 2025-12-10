@@ -4,7 +4,7 @@ import type { ArbItem } from "../hooks/useLiveData";
 import { usePositions, getBrokerPositions } from "../hooks/usePositions";
 import { Bell, BellOff, Calendar, ArrowUp } from "lucide-react";
 import React from "react";
-import api from "../api/api";
+import api, { getSheetsConfig } from "../api/api";
 
 interface Props {
   rows: ArbItem[];
@@ -2017,6 +2017,25 @@ export default function FullTriggerTable({
                       <button
                         onClick={async () => {
                           const side = calcSide(r);
+                          const localTimeDisplay =
+                            r.local_time ||
+                            (r.ended_ts &&
+                              new Date(
+                                r.ended_ts * 1000
+                              ).toLocaleTimeString()) ||
+                            (r.last_update_ts &&
+                              new Date(
+                                r.last_update_ts * 1000
+                              ).toLocaleTimeString()) ||
+                            (r.ts &&
+                              new Date(r.ts * 1000).toLocaleTimeString()) ||
+                            "";
+                          // Lấy owner_name từ cấu hình để gửi kèm
+                          let owner = "";
+                          try {
+                            const cfg = await getSheetsConfig();
+                            owner = cfg?.owner_name?.trim() || "";
+                          } catch {}
                           const payload = {
                             client: r.client || "",
                             server: r.server || "",
@@ -2030,19 +2049,13 @@ export default function FullTriggerTable({
                               side === "BUY"
                                 ? r.ask_server ?? r.ask_client ?? null
                                 : r.ask_server ?? r.ask_client ?? null,
-                            time:
-                              r.local_time ||
-                              (r.ts
-                                ? new Date(r.ts * 1000)
-                                    .toISOString()
-                                    .replace("T", " ")
-                                    .slice(0, 19)
-                                : ""),
+                            local_time: localTimeDisplay,
                             diff: r.trigger1
                               ? r.diff1_points_abs
                               : r.trigger2
                               ? r.diff2_points_abs
                               : null,
+                            owner_name: owner,
                           };
                           try {
                             const res = await api.post(
