@@ -2029,20 +2029,13 @@ export default function FullTriggerTable({
                             server: r.server || "",
                             symbol: r.symbol || "",
                             side,
-                            bid:
-                              side === "BUY"
-                                ? r.ask_client ?? r.ask_server ?? null
-                                : r.bid_client ?? r.bid_server ?? null,
-                            ask:
-                              side === "BUY"
-                                ? r.ask_server ?? r.ask_client ?? null
-                                : r.ask_server ?? r.ask_client ?? null,
+                            // giữ diff (độ lệch điểm)
                             diff: r.trigger1
                               ? r.diff1_points_abs
                               : r.trigger2
                               ? r.diff2_points_abs
                               : null,
-                            // Thời gian lệch (từ dữ liệu arbitrage – khác với time click)
+                            // Thời gian lệch hiển thị
                             delay:
                               (r.ended_ts &&
                                 new Date(
@@ -2055,6 +2048,11 @@ export default function FullTriggerTable({
                               (r.ts &&
                                 new Date(r.ts * 1000).toLocaleTimeString()) ||
                               "",
+                            // NEW: gửi đầy đủ giá để backend ghép "bid / ask"
+                            bid_client: r.bid_client ?? null,
+                            ask_client: r.ask_client ?? null,
+                            bid_server: r.bid_server ?? null,
+                            ask_server: r.ask_server ?? null,
                             // Name, Time (user bấm)
                             owner_name: owner,
                             local_time: userClickTime,
