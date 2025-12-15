@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import {
   getSheetsConfig,
   saveSheetsConfig,
-  pushSheetsNow,
   type SheetsConfig,
+  pushAttendance,
 } from "./api/api";
 import { useLiveData } from "./hooks/useLiveData";
 import "./index.scss";
@@ -22,7 +22,8 @@ export default function App() {
   // Config rút gọn: chỉ link, tên sheet + chọn tên người
   const [cfg, setCfg] = useState<SheetsConfig>({
     sheet_url: "",
-    sheet_name: "Sheet1",
+    sheet_name_attendance: "điểm danh",
+    sheet_name_keo: "KÊO PYTHON",
     owner_name: "Phát",
   });
   const [cfgLoading, setCfgLoading] = useState(false);
@@ -32,7 +33,8 @@ export default function App() {
   // Popup cấu hình
   const [showConfig, setShowConfig] = useState(false);
   const [tempUrl, setTempUrl] = useState("");
-  const [tempSheet, setTempSheet] = useState("Sheet1");
+  const [tempSheetAttendance, setTempSheetAttendance] = useState("điểm danh");
+  const [tempSheetKeo, setTempSheetKeo] = useState("KÊO PYTHON");
   const [tempOwner, setTempOwner] = useState("Phát");
 
   useEffect(() => {
@@ -41,11 +43,13 @@ export default function App() {
       .then((c) => {
         setCfg({
           sheet_url: c.sheet_url || "",
-          sheet_name: c.sheet_name || "Sheet1",
+          sheet_name_attendance: c.sheet_name_attendance || "điểm danh",
+          sheet_name_keo: c.sheet_name_keo || "KÊO PYTHON",
           owner_name: c.owner_name || "Phát",
         });
         setTempUrl(c.sheet_url || "");
-        setTempSheet(c.sheet_name || "Sheet1");
+        setTempSheetAttendance(c.sheet_name_attendance || "điểm danh");
+        setTempSheetKeo(c.sheet_name_keo || "KÊO PYTHON");
         setTempOwner(c.owner_name || "Phát");
       })
       .catch(() => {})
@@ -54,21 +58,27 @@ export default function App() {
 
   const openConfig = () => {
     setTempUrl(cfg.sheet_url || "");
-    setTempSheet(cfg.sheet_name || "Sheet1");
+    setTempSheetAttendance(cfg.sheet_name_attendance || "điểm danh");
+    setTempSheetKeo(cfg.sheet_name_keo || "KÊO PYTHON");
     setTempOwner(cfg.owner_name || "A");
     setCfgMsg(null);
     setShowConfig(true);
   };
 
   const saveConfigPopup = async () => {
+    const att = (tempSheetAttendance || "").trim().toUpperCase();
+    const keo = (tempSheetKeo || "").trim().toUpperCase();
     const nextCfg: SheetsConfig = {
-      sheet_url: tempUrl.trim(),
-      sheet_name: tempSheet.trim() || "Sheet1",
-      owner_name: tempOwner.trim(),
+      sheet_url: (tempUrl || "").trim(),
+      sheet_name_attendance: att || "ĐIỂM DANH",
+      sheet_name_keo: keo || "KÊO PYTHON",
+      owner_name: (tempOwner || "").trim(),
     };
     try {
       await saveSheetsConfig(nextCfg);
       setCfg(nextCfg);
+      setTempSheetAttendance(nextCfg.sheet_name_attendance);
+      setTempSheetKeo(nextCfg.sheet_name_keo);
       setCfgMsg(`Đã lưu cấu hình thành công`);
       setTimeout(() => setCfgMsg(null), 3000);
     } catch (e: any) {
@@ -77,15 +87,22 @@ export default function App() {
   };
 
   const onPush = async () => {
+    // CHỈ push sheet "điểm danh"
     setPushing(true);
     setCfgMsg(null);
     try {
-      const localTimeClick = new Date().toLocaleTimeString();
-      const res = await pushSheetsNow({
+      const d = new Date();
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const localTimeClick = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(
+        d.getDate()
+      )} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+
+      const res = await pushAttendance({
         owner_name: (tempOwner || "").trim(),
         local_time: localTimeClick,
       });
-      setCfgMsg(res.ok ? "Đẩy dữ liệu thành công" : res.error || "Push fail");
+      if (!res.ok) throw new Error(res.error || res.detail || "Push fail");
+      setCfgMsg("Đẩy data thành công");
     } catch (e: any) {
       setCfgMsg(e?.message || "Lỗi push");
     } finally {
@@ -211,9 +228,15 @@ export default function App() {
               />
               <input
                 className="px-3 py-2 rounded-md bg-neutral-800 text-neutral-200 w-full"
-                placeholder="Tên bảng (ví dụ: Sheet1)"
-                value={tempSheet}
-                onChange={(e) => setTempSheet(e.target.value)}
+                placeholder="Tên sheet điểm danh"
+                value={tempSheetAttendance}
+                onChange={(e) => setTempSheetAttendance(e.target.value)}
+              />
+              <input
+                className="px-3 py-2 rounded-md bg-neutral-800 text-neutral-200 w-full"
+                placeholder="Tên sheet KÊO PYTHON"
+                value={tempSheetKeo}
+                onChange={(e) => setTempSheetKeo(e.target.value)}
               />
               <select
                 className="px-3 py-2 rounded-md bg-neutral-800 text-neutral-200 w-full"
@@ -245,12 +268,13 @@ export default function App() {
                 disabled={
                   pushing ||
                   !tempUrl.trim() ||
-                  !tempSheet.trim() ||
+                  !tempSheetAttendance.trim() ||
+                  !tempSheetKeo.trim() ||
                   !tempOwner.trim()
                 }
                 className="px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm disabled:opacity-60"
               >
-                {pushing ? "Đang đẩy dữ liệu..." : "Đẩy dữ liệu lên Sheet"}
+                {pushing ? "Đang đẩy dữ liệu..." : "Đẩy data"}
               </button>
             </div>
           </div>

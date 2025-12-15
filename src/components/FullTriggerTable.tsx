@@ -4,7 +4,7 @@ import type { ArbItem } from "../hooks/useLiveData";
 import { usePositions, getBrokerPositions } from "../hooks/usePositions";
 import { Bell, BellOff, Calendar, ArrowUp } from "lucide-react";
 import React from "react";
-import api, { getSheetsConfig } from "../api/api";
+import api, { getSheetsConfig, pushKeoRow } from "../api/api";
 
 interface Props {
   rows: ArbItem[];
@@ -72,10 +72,6 @@ function formatMini(
 const MERGE_TOASTS = true;
 const SOUND_ALERT = "/sounds/lechgia.mp3";
 const SOUND_VOLUME = Number((import.meta as any).env?.VITE_SOUND_VOLUME || "1");
-
-// helper: xác định chiều vào lệnh từ trigger
-const calcSide = (r: ArbItem): "BUY" | "SELL" | "-" =>
-  r.trigger1 ? "BUY" : r.trigger2 ? "SELL" : "-";
 
 export default function FullTriggerTable({
   rows,
@@ -287,6 +283,13 @@ export default function FullTriggerTable({
   const nowSec = () => Date.now() / 1000;
   const keyOf = (r: ArbItem) =>
     `${r.server || ""}|${r.client || ""}|${r.symbol || ""}`;
+  // Helper format 24h YYYY-MM-DD HH:mm:ss
+  const fmtYmdHms = (d: Date) => {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(
+      d.getDate()
+    )} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  };
 
   // ===== Toast helpers =====
   const upsertToast = (
@@ -1662,11 +1665,10 @@ export default function FullTriggerTable({
                   : null;
                 const localTimeDisplay =
                   r.local_time ||
-                  (r.ended_ts &&
-                    new Date(r.ended_ts * 1000).toLocaleTimeString()) ||
+                  (r.ended_ts && fmtYmdHms(new Date(r.ended_ts * 1000))) ||
                   (r.last_update_ts &&
-                    new Date(r.last_update_ts * 1000).toLocaleTimeString()) ||
-                  (r.ts && new Date(r.ts * 1000).toLocaleTimeString()) ||
+                    fmtYmdHms(new Date(r.last_update_ts * 1000))) ||
+                  (r.ts && fmtYmdHms(new Date(r.ts * 1000))) ||
                   "-";
                 const fsBidServer = formatMini(bidServer, {
                   symbol: r.symbol,
@@ -2014,77 +2016,77 @@ export default function FullTriggerTable({
                       )}
                     </td>
                     <td className="px-3 py-1 text-center">
+                      {/* Nút đẩy lên sheet KÊO PYTHON */}
                       <button
                         onClick={async () => {
-                          const side = calcSide(r);
-                          // Lấy owner_name từ cấu hình để gửi kèm
-                          let owner = "";
+                          const toastId = `PUSH_${r.server || ""}_${
+                            r.client || ""
+                          }_${r.symbol || ""}_${Date.now()}`;
                           try {
+                            upsertToast(
+                              setToasts,
+                              toastId,
+                              "pending",
+                              "Đang đẩy data..."
+                            );
                             const cfg = await getSheetsConfig();
-                            owner = cfg?.owner_name?.trim() || "";
-                          } catch {}
-                          const userClickTime = new Date().toLocaleTimeString();
-                          const payload = {
-                            client: r.client || "",
-                            server: r.server || "",
-                            symbol: r.symbol || "",
-                            side,
-                            // giữ diff (độ lệch điểm)
-                            diff: r.trigger1
+                            const owner = cfg?.owner_name || "";
+                            const now = new Date();
+                            const timeClick = fmtYmdHms(now);
+
+                            // thời điểm xuất hiện arbitrage (ưu tiên ended_ts -> last_update_ts -> ts)
+                            const base =
+                              (r.ended_ts as any) ||
+                              (r.last_update_ts as any) ||
+                              (r.ts as any) ||
+                              Math.floor(Date.now() / 1000);
+                            const appear = fmtYmdHms(
+                              new Date(Number(base) * 1000)
+                            );
+
+                            const diffAbs = r.trigger1
                               ? r.diff1_points_abs
                               : r.trigger2
                               ? r.diff2_points_abs
-                              : null,
-                            // Thời gian lệch hiển thị
-                            delay:
-                              (r.ended_ts &&
-                                new Date(
-                                  r.ended_ts * 1000
-                                ).toLocaleTimeString()) ||
-                              (r.last_update_ts &&
-                                new Date(
-                                  r.last_update_ts * 1000
-                                ).toLocaleTimeString()) ||
-                              (r.ts &&
-                                new Date(r.ts * 1000).toLocaleTimeString()) ||
-                              "",
-                            // NEW: gửi đầy đủ giá để backend ghép "bid / ask"
-                            bid_client: r.bid_client ?? null,
-                            ask_client: r.ask_client ?? null,
-                            bid_server: r.bid_server ?? null,
-                            ask_server: r.ask_server ?? null,
-                            // Name, Time (user bấm)
-                            owner_name: owner,
-                            local_time: userClickTime,
-                          };
-                          try {
-                            const res = await api.post(
-                              "/api/sheets/push_row",
-                              payload
-                            );
+                              : r.diff1_points_abs ??
+                                r.diff2_points_abs ??
+                                r.gap_pts;
+
+                            const res = await pushKeoRow({
+                              owner_name: owner,
+                              local_time: timeClick,
+                              appear_time: appear,
+                              client_name: r.client || "",
+                              symbol: r.symbol || "",
+                              do_lech:
+                                diffAbs == null
+                                  ? ""
+                                  : typeof diffAbs === "number"
+                                  ? diffAbs
+                                  : String(diffAbs),
+                              server_name: r.server || "",
+                            });
+                            if (!res.ok)
+                              throw new Error(
+                                res.error || res.detail || "Push fail"
+                              );
                             upsertToast(
                               setToasts,
-                              `PUSH_${r.server || ""}_${r.client || ""}_${
-                                r.symbol || ""
-                              }`,
-                              res.data?.ok ? "success" : "fail",
-                              res.data?.ok
-                                ? "Đẩy dữ liệu thành công"
-                                : res.data?.error || "Push thất bại"
+                              toastId,
+                              "success",
+                              "Đẩy data thành công"
                             );
                           } catch (e: any) {
                             upsertToast(
                               setToasts,
-                              `PUSH_${r.server || ""}_${r.client || ""}_${
-                                r.symbol || ""
-                              }`,
+                              toastId,
                               "fail",
                               e?.message || "Push thất bại"
                             );
                           }
                         }}
                         className="inline-flex items-center justify-center w-7 h-7 rounded bg-emerald-600/80 hover:bg-emerald-500 text-white"
-                        title="Gửi dòng này lên Google Sheet"
+                        title="Gửi dòng này lên Google Sheet (KÊO PYTHON)"
                         aria-label="Push lên Sheet"
                       >
                         <ArrowUp size={14} />
