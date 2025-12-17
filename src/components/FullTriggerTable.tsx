@@ -202,6 +202,31 @@ export default function FullTriggerTable({
   const quietBtnRef = useRef<HTMLButtonElement | null>(null);
   const [quietBtnRect, setQuietBtnRect] = useState<DOMRect | null>(null);
 
+  // --- NEW: Global mute theo phút ---
+  const [globalMuteUntil, setGlobalMuteUntil] = useState<number | null>(() => {
+    try {
+      const v = Number(localStorage.getItem("globalMuteUntil") || "");
+      return v > Date.now() ? v : null;
+    } catch {
+      return null;
+    }
+  });
+  useEffect(() => {
+    if (globalMuteUntil && globalMuteUntil > Date.now()) {
+      localStorage.setItem("globalMuteUntil", String(globalMuteUntil));
+    } else {
+      localStorage.removeItem("globalMuteUntil");
+    }
+  }, [globalMuteUntil]);
+
+  const isGlobalMuted = () =>
+    !isOld && globalMuteUntil != null && Date.now() < globalMuteUntil;
+
+  const [gmOpen, setGmOpen] = useState(false);
+  const gmBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [gmBtnRect, setGmBtnRect] = useState<DOMRect | null>(null);
+  const [gmMins, setGmMins] = useState<number>(15);
+
   // rowMute: { muted: boolean; until: timestamp|null }
   const [rowMute, setRowMute] = useState<
     Record<string, { muted: boolean; until: number | null }>
@@ -360,7 +385,7 @@ export default function FullTriggerTable({
   }, []);
 
   const playSound = useCallback(() => {
-    if (isOld || disableSound || isWithinQuiet()) return;
+    if (isOld || disableSound || isWithinQuiet() || isGlobalMuted()) return;
     const audio = audioAlertRef.current;
     if (audio) {
       audio.currentTime = 0;
@@ -370,12 +395,19 @@ export default function FullTriggerTable({
       return;
     }
     playBeep(660);
-  }, [disableSound, isOld, isWithinQuiet, playBeep]);
+  }, [disableSound, isOld, isWithinQuiet, isGlobalMuted, playBeep]);
 
+  // Phát âm thanh khi có kèo mới kích hoạt, bỏ qua các kèo đang ẩn
   useEffect(() => {
     const activeKeys = new Set(
-      rows.filter((r) => r.trigger1 || r.trigger2).map((r) => keyOf(r))
+      rows
+        .filter((r) => {
+          const k = keyOf(r);
+          return (r.trigger1 || r.trigger2) && !isHiddenActive(k);
+        })
+        .map((r) => keyOf(r))
     );
+
     let shouldPlay = false;
     activeKeys.forEach((k) => {
       if (!prevActiveKeysRef.current.has(k) && !isRowMuted(k)) {
@@ -384,7 +416,7 @@ export default function FullTriggerTable({
     });
     prevActiveKeysRef.current = activeKeys;
     if (shouldPlay) playSound();
-  }, [rows, playSound, isRowMuted]);
+  }, [rows, playSound, isRowMuted, hiddenMap, hideTtlMins, isOld]); // thêm deps để xét ẩn kèo
 
   useEffect(() => {
     const audio = new Audio(alertSrc);
@@ -582,7 +614,18 @@ export default function FullTriggerTable({
     hideTtlMins, // NEW
   ]);
 
+  // Nhóm & sắp xếp dữ liệu hiển thị
   const grouped = useMemo(() => {
+    if (isOld) {
+      // Bảng kèo cũ: không nhóm theo server, sắp xếp theo thời gian gần nhất (ended_ts/last_update_ts/ts) giảm dần
+      const sortedByRecent = [...filtered].sort((a, b) => {
+        const ta = (a.ended_ts || a.last_update_ts || a.ts || 0) as number;
+        const tb = (b.ended_ts || b.last_update_ts || b.ts || 0) as number;
+        return tb - ta;
+      });
+      return [["__ALL__", sortedByRecent]] as [string, ArbItem[]][];
+    }
+    // Bảng kèo hiện tại: vẫn nhóm theo server như cũ
     const m = new Map<string, ArbItem[]>();
     filtered.forEach((r) => {
       const key = r.server || "UNKNOWN";
@@ -590,7 +633,7 @@ export default function FullTriggerTable({
       m.get(key)!.push(r);
     });
     return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [filtered]);
+  }, [filtered, isOld]);
 
   // ===== Handlers =====
   const toggleExpandBroker = (bk: string) => {
@@ -1507,6 +1550,115 @@ export default function FullTriggerTable({
         )}
         {!isOld && (
           <>
+            {/* NEW: Global mute theo phút */}
+            <div className="relative">
+              <button
+                ref={gmBtnRef}
+                onClick={() => {
+                  setGmOpen((o) => !o);
+                  setGmBtnRect(
+                    gmBtnRef.current?.getBoundingClientRect() || null
+                  );
+                  // set mặc định khi mở
+                  const remain = isGlobalMuted()
+                    ? Math.ceil((globalMuteUntil! - Date.now()) / 60000)
+                    : 30;
+                  setGmMins(Math.max(1, remain || 30));
+                }}
+                className={`px-2 py-1 rounded text-[11px] flex items-center gap-1 transition-colors ${
+                  isGlobalMuted()
+                    ? "bg-red-600 text-white shadow-sm"
+                    : "bg-neutral-700 hover:bg-neutral-600 text-neutral-200"
+                }`}
+                title="Mute âm thanh kèo mới theo số phút"
+              >
+                <BellOff size={14} />
+                <span>Mute sound</span>
+                {isGlobalMuted() && (
+                  <span className="text-[9px] font-semibold bg-white/20 px-1 rounded">
+                    ON
+                  </span>
+                )}
+              </button>
+              {gmOpen &&
+                createPortal(
+                  <div
+                    className="fixed z-[500] w-64 p-3 rounded-md border border-neutral-600 bg-neutral-900 shadow-xl"
+                    style={{
+                      top: gmBtnRect?.bottom ?? 0,
+                      left: gmBtnRect?.left ?? 0,
+                    }}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-semibold text-neutral-200">
+                        Mute theo phút
+                      </span>
+                      <button
+                        onClick={() => setGmOpen(false)}
+                        className="px-2 py-0.5 rounded bg-neutral-700 hover:bg-neutral-600 text-[10px]"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <input
+                        type="number"
+                        min={1}
+                        value={gmMins}
+                        onChange={(e) =>
+                          setGmMins(Math.max(1, Number(e.target.value) || 30))
+                        }
+                        className="w-24 bg-neutral-800/80 border border-neutral-600 rounded px-2 py-1 text-[11px] text-center"
+                        placeholder="Phút"
+                        title="Số phút mute (>=1)"
+                      />
+                      <button
+                        onClick={() => {
+                          setGlobalMuteUntil(Date.now() + gmMins * 60000);
+                          setGmOpen(false);
+                        }}
+                        className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-[11px] text-white"
+                      >
+                        Áp dụng
+                      </button>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setGlobalMuteUntil(null);
+                          setGmOpen(false);
+                        }}
+                        className="flex-1 px-2 py-1 rounded bg-green-600/70 hover:bg-green-500 text-[11px] text-white"
+                      >
+                        Bật lại
+                      </button>
+                      <button
+                        onClick={() => {
+                          // Mute nhanh với 30 phút nếu chưa nhập
+                          const mins = gmMins || 30;
+                          setGlobalMuteUntil(Date.now() + mins * 60000);
+                          setGmOpen(false);
+                        }}
+                        className="flex-1 px-2 py-1 rounded bg-red-600/70 hover:bg-red-500 text-[11px] text-white"
+                      >
+                        Mute
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[10px] text-neutral-400 leading-snug">
+                      Đang {isGlobalMuted() ? "mute" : "không mute"}.
+                      {isGlobalMuted() && globalMuteUntil
+                        ? ` Còn ~${Math.max(
+                            0,
+                            Math.ceil((globalMuteUntil - Date.now()) / 60000)
+                          )} phút.`
+                        : ""}
+                    </p>
+                  </div>,
+                  document.body
+                )}
+            </div>
+
+            {/* Đổi tên “Mute” cũ -> Lịch im lặng */}
             <div className="relative">
               <button
                 ref={quietBtnRef}
@@ -1524,7 +1676,7 @@ export default function FullTriggerTable({
                 title="Thiết lập khoảng giờ im lặng âm thanh"
               >
                 <Calendar size={14} />
-                <span>Mute</span>
+                <span>Lịch im lặng</span>
                 {isWithinQuiet() && (
                   <span className="text-[9px] font-semibold bg-white/20 px-1 rounded">
                     ON
@@ -2159,7 +2311,7 @@ function RowMuteEditor({
   onUnmute: () => void;
 }) {
   const [mins, setMins] = useState(
-    value?.until ? Math.ceil((value.until - Date.now()) / 60000) : 0
+    value?.until ? Math.ceil((value.until - Date.now()) / 60000) : 30
   );
   return (
     <div className="space-y-2">
