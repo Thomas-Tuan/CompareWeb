@@ -1563,7 +1563,7 @@ export default function FullTriggerTable({
                   const remain = isGlobalMuted()
                     ? Math.ceil((globalMuteUntil! - Date.now()) / 60000)
                     : 30;
-                  setGmMins(Math.max(1, remain || 30));
+                  setGmMins(Math.max(1, remain || 15));
                 }}
                 className={`px-2 py-1 rounded text-[11px] flex items-center gap-1 transition-colors ${
                   isGlobalMuted()
@@ -1606,7 +1606,7 @@ export default function FullTriggerTable({
                         min={1}
                         value={gmMins}
                         onChange={(e) =>
-                          setGmMins(Math.max(1, Number(e.target.value) || 30))
+                          setGmMins(Math.max(1, Number(e.target.value) || 15))
                         }
                         className="w-24 bg-neutral-800/80 border border-neutral-600 rounded px-2 py-1 text-[11px] text-center"
                         placeholder="Phút"
@@ -1634,8 +1634,8 @@ export default function FullTriggerTable({
                       </button>
                       <button
                         onClick={() => {
-                          // Mute nhanh với 30 phút nếu chưa nhập
-                          const mins = gmMins || 30;
+                          // Mute nhanh với 15 phút nếu chưa nhập
+                          const mins = gmMins || 15;
                           setGlobalMuteUntil(Date.now() + mins * 60000);
                           setGmOpen(false);
                         }}
