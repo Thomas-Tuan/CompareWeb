@@ -225,7 +225,7 @@ export default function FullTriggerTable({
   const [gmOpen, setGmOpen] = useState(false);
   const gmBtnRef = useRef<HTMLButtonElement | null>(null);
   const [gmBtnRect, setGmBtnRect] = useState<DOMRect | null>(null);
-  const [gmMins, setGmMins] = useState<number>(15);
+  const [gmMins, setGmMins] = useState<number>(30);
 
   // rowMute: { muted: boolean; until: timestamp|null }
   const [rowMute, setRowMute] = useState<
@@ -556,10 +556,12 @@ export default function FullTriggerTable({
   // ===== Derived =====
   const displayRows = useMemo(
     () =>
-      Object.values(stableRef.current)
-        .sort((a, b) => a.firstOrder - b.firstOrder)
-        .map((s) => s.row),
-    [rows, stableVersion]
+      isOld
+        ? rows // BẢNG KÈO CŨ: lấy trực tiếp dữ liệu truyền vào
+        : Object.values(stableRef.current)
+            .sort((a, b) => a.firstOrder - b.firstOrder)
+            .map((s) => s.row),
+    [rows, stableVersion, isOld]
   );
 
   const servers = useMemo(() => {
@@ -1563,7 +1565,7 @@ export default function FullTriggerTable({
                   const remain = isGlobalMuted()
                     ? Math.ceil((globalMuteUntil! - Date.now()) / 60000)
                     : 30;
-                  setGmMins(Math.max(1, remain || 15));
+                  setGmMins(Math.max(1, remain || 30));
                 }}
                 className={`px-2 py-1 rounded text-[11px] flex items-center gap-1 transition-colors ${
                   isGlobalMuted()
@@ -1606,7 +1608,7 @@ export default function FullTriggerTable({
                         min={1}
                         value={gmMins}
                         onChange={(e) =>
-                          setGmMins(Math.max(1, Number(e.target.value) || 15))
+                          setGmMins(Math.max(1, Number(e.target.value) || 30))
                         }
                         className="w-24 bg-neutral-800/80 border border-neutral-600 rounded px-2 py-1 text-[11px] text-center"
                         placeholder="Phút"
@@ -1635,7 +1637,7 @@ export default function FullTriggerTable({
                       <button
                         onClick={() => {
                           // Mute nhanh với 15 phút nếu chưa nhập
-                          const mins = gmMins || 15;
+                          const mins = gmMins || 30;
                           setGlobalMuteUntil(Date.now() + mins * 60000);
                           setGmOpen(false);
                         }}
@@ -1791,12 +1793,14 @@ export default function FullTriggerTable({
           </thead>
           <tbody>
             {grouped.map(([, list]) => {
-              const sorted = [...list].sort(
-                (a, b) =>
-                  (a.symbol || "").localeCompare(b.symbol || "") ||
-                  (a.client || "").localeCompare(b.client || "")
-              );
-              return sorted.map((r) => {
+              const rowsToRender = isOld
+                ? list
+                : [...list].sort(
+                    (a, b) =>
+                      (a.symbol || "").localeCompare(b.symbol || "") ||
+                      (a.client || "").localeCompare(b.client || "")
+                  );
+              return rowsToRender.map((r) => {
                 const k = keyOf(r);
                 const bidServer = r.bid_server,
                   askServer = r.ask_server;
